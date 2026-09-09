@@ -1,73 +1,91 @@
 import streamlit as st
+import gspread
 import pandas as pd
-import os
-from datetime import datetime
+from google.oauth2.service_account import Credentials
 
-st.set_page_config(page_title="BITU - Banco de Insumos", page_icon="logo.png", layout="wide")
+st.set_page_config(page_title="BITU - Tienda", layout="wide")
 
-col_logo, col_tit = st.columns([1,4])
-with col_logo:
-    if os.path.exists("logo.png"):
-        st.image("logo.png", width=150)
-with col_tit:
-    st.title("BITU")
-    st.write("**Banco de Insumos Todos Unidos**")
-    st.caption('"CUANDO NOS UNIMOS, ALCANZA PARA TODOS" - ASOCIACION CIVIL SIN FINES DE LUCRO')
-
-ARCHIVO_PRODUCTOS = "productos.xlsx"
-ARCHIVO_VENTAS = "ventas.xlsx"
-
-@st.cache_data
-def cargar_productos():
-    return pd.read_excel(ARCHIVO_PRODUCTOS)
+# CONECTAR A GOOGLE SHEETS CON TUS SECRETS
+@st.cache_resource
+def conectar():
+    info = dict(st.secrets["gcp_service_account"])
+    creds = Credentials.from_service_account_info(info, scopes=["https://www.googleapis.com/auth/spreadsheets"])
+    client = gspread.authorize(creds)
+    sheet_id = st.secrets["SHEET_ID"]
+    return client.open_by_key(sheet_id).sheet1
 
 try:
-    df_productos = cargar_productos()
-except:
-    st.error("Cierra tu Excel y recarga con R")
+    sheet = conectar()
+except Exception as e:
+    st.error(f"No pude conectar a Sheets: {e}")
+    st.info("Verifica que pegaste bien los Secrets y que compartiste la hoja con bitu-app@cosmic-tensor-508103-f1.iam.gserviceaccount.com")
     st.stop()
 
-if os.path.exists(ARCHIVO_VENTAS):
-    df_ventas = pd.read_excel(ARCHIVO_VENTAS)
-else:
-    df_ventas = pd.DataFrame(columns=["FECHA","PRODUCTO","CANTIDAD","PRECIO","GANANCIA"])
+# LEER DATOS
+datos = sheet.get_all_records()
+df = pd.DataFrame(datos)
 
-stock_vendido = df_ventas.groupby("PRODUCTO")["CANTIDAD"].sum().to_dict()
-df_productos["VENDIDO"] = df_productos["PRODUCTO"].map(stock_vendido).fillna(0)
-if "INICIAL" in df_productos.columns:
-    df_productos["INICIAL"] = pd.to_numeric(df_productos["INICIAL"], errors='coerce').fillna(0)
-    df_productos["STOCK_ACTUAL"] = df_productos["INICIAL"] - df_productos["VENDIDO"]
-else:
-    df_productos["STOCK_ACTUAL"] = 999
+st.title(f"Inventario BITU ({len(df)} productos)")
 
-c1, c2 = st.columns([1,2])
-with c1:
-    st.subheader("Registrar Venta BITU")
-    producto = st.selectbox("Producto:", df_productos["PRODUCTO"].tolist())
-    datos = df_productos[df_productos["PRODUCTO"]==producto].iloc[0]
-    st.metric("Precio", f"${datos['PRECIO']}", f"Stock: {int(datos['STOCK_ACTUAL'])}")
-    cantidad = st.number_input("Cantidad:", min_value=1, max_value=int(datos['STOCK_ACTUAL']) if datos['STOCK_ACTUAL']>0 else 1, value=1)
-    if st.button("✅ VENDER", type="primary", use_container_width=True):
-        nueva_venta = {
-            "FECHA": datetime.now().strftime("%Y-%m-%d %H:%M"),
-            "PRODUCTO": producto,
-            "CANTIDAD": cantidad,
-            "PRECIO": datos['PRECIO']*cantidad,
-            "GANANCIA": 0
-        }
-        df_ventas = pd.concat([df_ventas, pd.DataFrame([nueva_venta])], ignore_index=True)
-        df_ventas.to_excel(ARCHIVO_VENTAS, index=False)
-        st.success(f"Vendido {cantidad} x {producto}")
-        st.cache_data.clear()
-        st.rerun()
-    if not df_ventas.empty:
-        hoy = datetime.now().strftime("%Y-%m-%d")
-        ventas_hoy = df_ventas[df_ventas["FECHA"].astype(str).str.contains(hoy)]
-        st.metric("Ventas hoy BITU", f"${ventas_hoy['PRECIO'].sum():.0f}")
+# CORREGIR EL -3: Si INV FINAL está mal, lo recalculamos
+# Busca columnas, si no existen usa STOCK_ACTUAL
+col_producto = 'PRODUCTO' if 'PRODUCTO' in df.columns else df.columns[0]
 
-with c2:
-    st.subheader(f"Inventario BITU ({len(df_productos)} productos)")
-    st.dataframe(df_productos[["PRODUCTO","STOCK_ACTUAL","PRECIO","VENDIDO"]].sort_values("STOCK_ACTUAL"), use_container_width=True, height=400)
-    st.subheader("Últimas ventas")
-    if not df_ventas.empty:
-        st.dataframe(df_ventas.tail(10).sort_values("FECHA", ascending=False), use_container_width=True)
+# Mostrar tabla
+st.dataframe(df, width='stretch')
+
+st.divider()
+st.subheader("Registrar movimiento")
+
+producto_sel = st.selectbox("Elige producto", df[col_producto].tolist())
+
+# Encontrar fila del producto
+idx_fila = df.index[df[col_producto]==producto_sel][0]
+fila_sheet = idx_fila + 2 # +2 por encabezado y 1-indexed
+
+# Detectar columnas
+def get_col(nombre):
+    try:
+        return df.columns.get_loc(nombre) + 1
+    except:
+        return None
+
+c_ent = get_col('ENTRADA')
+c_ven = get_col('VENTA CALCULADA')
+c_ini = get_col('INV INICIAL')
+c_fin = get_col('INV FINAL')
+
+col1, col2 = st.columns(2)
+
+with col1:
+    cant_ent = st.number_input("📦 ENTRADA", min_value=0, value=0)
+    if st.button("Sumar Entrada", type="primary"):
+        if c_ent:
+            actual = int(str(sheet.cell(fila_sheet, c_ent).value or 0).strip() or 0)
+            sheet.update_cell(fila_sheet, c_ent, actual + cant_ent)
+            # Recalcular INV FINAL = INV INICIAL + ENTRADA - VENTA
+            if c_ini and c_fin and c_ven:
+                ini = int(str(sheet.cell(fila_sheet, c_ini).value or 0) or 0)
+                ven = int(str(sheet.cell(fila_sheet, c_ven).value or 0) or 0)
+                ent_nueva = actual + cant_ent
+                sheet.update_cell(fila_sheet, c_fin, ini + ent_nueva - ven)
+            st.success(f"Entrada de {cant_ent} guardada en {producto_sel}")
+            st.cache_data.clear()
+            st.rerun()
+
+with col2:
+    cant_ven = st.number_input("🛒 VENTA", min_value=0, value=0)
+    if st.button("Registrar Venta"):
+        if c_ven:
+            actual = int(str(sheet.cell(fila_sheet, c_ven).value or 0).strip() or 0)
+            sheet.update_cell(fila_sheet, c_ven, actual + cant_ven)
+            if c_ini and c_fin and c_ent:
+                ini = int(str(sheet.cell(fila_sheet, c_ini).value or 0) or 0)
+                ent = int(str(sheet.cell(fila_sheet, c_ent).value or 0) or 0)
+                sheet.update_cell(fila_sheet, c_fin, ini + ent - (actual + cant_ven))
+            st.success(f"Venta de {cant_ven} guardada")
+            st.cache_data.clear()
+            st.rerun()
+
+st.subheader("Últimas ventas")
+st.dataframe(df.tail(10), width='stretch')
