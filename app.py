@@ -14,16 +14,16 @@ def conectar():
     sheet_id = st.secrets["SHEET_ID"]
     return client.open_by_key(sheet_id).sheet1
 
-try:
-    sheet = conectar()
-except Exception as e:
-    st.error(f"No pude conectar a Sheets: {e}")
-    st.info("Verifica que pegaste bien los Secrets y que compartiste la hoja con bitu-app@cosmic-tensor-508103-f1.iam.gserviceaccount.com")
-    st.stop()
-
-# LEER DATOS
-datos = sheet.get_all_records()
-df = pd.DataFrame(datos)
+17 try:
+18     sheet = conectar()
+19     datos = sheet.get_all_records(expected_headers=[], head=1)
+20     df = pd.DataFrame(datos)
+21     df = df[df['PRODUCTO'].astype(str).str.strip() != ""]
+22 except Exception as e:
+23     st.error...
+24     st.stop()
+25
+26 st.title(f"Inventario BITU ({len(df)} productos)")
 
 st.title(f"Inventario BITU ({len(df)} productos)")
 
