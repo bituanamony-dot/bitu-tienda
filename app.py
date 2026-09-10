@@ -30,6 +30,7 @@ if 'carrito' not in st.session_state:
 df, sheet = cargar_datos()
 
 st.title("🛒 BITU - Tienda")
+
 c1, c2 = st.columns([2.5, 1])
 
 with c1:
@@ -40,14 +41,20 @@ with c1:
     for i, row in df_show.iterrows():
         with st.container(border=True):
             colA, colB, colC, colD = st.columns([3,1,1,1])
-            colA.markdown(f"**{row['PRODUCTO']}**")
             stock_real = int(row['INV INICIAL'] + row['ENTRADA'] - row['VENTA CALCULADA'])
-            colA.caption(f"Stock: {stock_real} | Ganas: ${row['COMISION PUNTO ENTREGA']}")
+            colA.markdown(f"**{row['PRODUCTO']}**")
+            colA.caption(f"Stock: {stock_real} | Ganas: ${int(row['COMISION PUNTO ENTREGA'])}")
             colB.metric("Precio", f"${int(row['CUOTA BANCO'])}")
-           stock_real = int(row['INV INICIAL'] + row['ENTRADA'] - row['VENTA CALCULADA'])
-            cant = colC.number_input("cant", 1, stock_real if stock_real>0 else 1, 1, key=f"q{i}", label_visibility="collapsed")
+            cant = colC.number_input("cant", 1, stock_real if stock_real > 0 else 1, 1, key=f"q{i}", label_visibility="collapsed")
             if colD.button("Agregar", key=f"a{i}"):
-                st.session_state.carrito.append({"producto": row['PRODUCTO'], "precio": row['CUOTA BANCO'], "comision": row['COMISION PUNTO ENTREGA'], "cant": cant, "fila": i+2})
+                st.session_state.carrito.append({
+                    "producto": row['PRODUCTO'],
+                    "precio": row['CUOTA BANCO'],
+                    "comision": row['COMISION PUNTO ENTREGA'],
+                    "cant": cant,
+                    "fila": i+2,
+                    "venta_actual": row['VENTA CALCULADA']
+                })
                 st.toast(f"Agregado {row['PRODUCTO']}")
 
 with c2:
@@ -59,7 +66,6 @@ with c2:
         ganancia = sum(x['comision']*x['cant'] for x in st.session_state.carrito)
         for x in st.session_state.carrito:
             st.write(f"{x['cant']} x {x['producto']}")
-
         st.divider()
         st.metric("TOTAL", f"${int(total)}")
         st.metric("TU GANANCIA", f"${int(ganancia)}")
@@ -67,11 +73,10 @@ with c2:
         if st.button("✅ COBRAR Y DESCONTAR STOCK", type="primary", use_container_width=True):
             with st.spinner("Actualizando Sheet..."):
                 for item in st.session_state.carrito:
-                    # Columna F = INV FINAL (6), G = VENTA CALCULADA (7) - ajusta si tu orden es diferente
-                    sheet.update_cell(item['fila'], 6, int(df.iloc[item['fila']-2]['INV FINAL'] - item['cant']))
-                    sheet.update_cell(item['fila'], 7, int(df.iloc[item['fila']-2]['VENTA CALCULADA'] + item['cant']))
+                    nueva_venta = int(item['venta_actual'] + item['cant'])
+                    sheet.update_cell(item['fila'], 7, nueva_venta)
             st.balloons()
-            st.success(f"¡Cobrado! Ganaste ${int(ganancia)}")
+            st.success(f"Cobrado! Ganaste ${int(ganancia)}")
             st.session_state.carrito = []
             st.cache_data.clear()
             st.rerun()
