@@ -1,6 +1,6 @@
 import streamlit as st
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+from google.oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
 
 st.set_page_config(page_title="BITU", page_icon="🛒", layout="wide")
