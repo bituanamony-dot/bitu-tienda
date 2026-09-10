@@ -7,7 +7,7 @@ st.set_page_config(page_title="BITU")
 scope = ["https://www.googleapis.com/auth/spreadsheets","https://www.googleapis.com/auth/drive"]
 creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
 client = gspread.authorize(creds)
-sheet = client.open_by_key(st.secrets["sheet_ID"]).sheet1
+sheet = client.open_by_key(st.secrets["SHEET_ID"]).sheet1
 
 data = sheet.get_all_values()
 productos=[]
