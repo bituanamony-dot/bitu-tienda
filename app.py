@@ -1,13 +1,13 @@
 import streamlit as st
 import gspread
-from google.oauth2client.service_account import Credentials
+from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
 
 st.set_page_config(page_title="BITU", page_icon="🛒", layout="wide")
 
 # --- CONEXION A GOOGLE SHEET ---
 scope = ["https://spreadsheets.google.com/feeds",'https://www.googleapis.com/auth/drive']
-creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
+creds = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gcp_service_account"], scope)
 client = gspread.authorize(creds)
 sheet = client.open_by_url(st.secrets["sheet_url"]).sheet1
 
