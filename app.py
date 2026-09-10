@@ -41,9 +41,11 @@ with c1:
         with st.container(border=True):
             colA, colB, colC, colD = st.columns([3,1,1,1])
             colA.markdown(f"**{row['PRODUCTO']}**")
-            colA.caption(f"Stock: {int(row['INV FINAL'])} | Ganas: ${row['COMISION PUNTO ENTREGA']}")
+            stock_real = int(row['INV INICIAL'] + row['ENTRADA'] - row['VENTA CALCULADA'])
+            colA.caption(f"Stock: {stock_real} | Ganas: ${row['COMISION PUNTO ENTREGA']}")
             colB.metric("Precio", f"${int(row['CUOTA BANCO'])}")
-            cant = colC.number_input("cant", 1, int(row['INV FINAL']) if row['INV FINAL']>0 else 1, 1, key=f"q{i}", label_visibility="collapsed")
+           stock_real = int(row['INV INICIAL'] + row['ENTRADA'] - row['VENTA CALCULADA'])
+            cant = colC.number_input("cant", 1, stock_real if stock_real>0 else 1, 1, key=f"q{i}", label_visibility="collapsed")
             if colD.button("Agregar", key=f"a{i}"):
                 st.session_state.carrito.append({"producto": row['PRODUCTO'], "precio": row['CUOTA BANCO'], "comision": row['COMISION PUNTO ENTREGA'], "cant": cant, "fila": i+2})
                 st.toast(f"Agregado {row['PRODUCTO']}")
