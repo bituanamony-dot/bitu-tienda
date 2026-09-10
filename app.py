@@ -3,33 +3,77 @@ import gspread
 import pandas as pd
 from google.oauth2.service_account import Credentials
 
-st.set_page_config(page_title="BITU - Tienda", layout="wide")
+st.set_page_config(page_title="BITU - Tienda", layout="wide", page_icon="🛒")
 
-# CONECTAR A GOOGLE SHEETS CON TUS SECRETS
 @st.cache_resource
 def conectar():
     info = dict(st.secrets["gcp_service_account"])
     creds = Credentials.from_service_account_info(info, scopes=["https://www.googleapis.com/auth/spreadsheets","https://www.googleapis.com/auth/drive"])
     client = gspread.authorize(creds)
     sheet_id = st.secrets["SHEET_ID"]
-    return client.open_by_key(sheet_id).sheet1
+    sh = client.open_by_key(sheet_id)
+    return sh.sheet1
 
-try:
+def cargar_datos():
     sheet = conectar()
-    datos = sheet.get_all_records(expected_headers=[], head=1)
+    datos = sheet.get_all_records()
     df = pd.DataFrame(datos)
     df = df[df['PRODUCTO'].astype(str).str.strip()!= ""]
-except Exception as e:
-    st.error(f"No pude conectar a Sheets: {e}")
-    st.info("Verifica Secrets y que compartiste la Sheet con bitu-app@cosmic-tensor-508103-f1.iam.gserviceaccount.com")
-    st.stop()
+    for c in df.columns:
+        if c!= 'PRODUCTO':
+            df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
+    return df, sheet
 
-st.title(f"Inventario BITU ({len(df)} productos)")
+if 'carrito' not in st.session_state:
+    st.session_state.carrito = []
 
-# CORREGIR EL -3: Si INV FINAL está mal, lo recalculamos
-# Busca columnas, si no existen usa STOCK_ACTUAL
-col_producto = 'PRODUCTO' if 'PRODUCTO' in df.columns else df.columns[0]
+df, sheet = cargar_datos()
 
-# Mostrar tabla
-st.dataframe(df, use_container_width=True)
+st.title("🛒 BITU - Tienda")
+c1, c2 = st.columns([2.5, 1])
 
+with c1:
+    busca = st.text_input("🔍 Buscar", placeholder="Ej. ACEITE, AGUA, DESPENSA...")
+    df_show = df[df['PRODUCTO'].str.contains(busca, case=False, na=False)] if busca else df
+    st.caption(f"Productos: {len(df_show)} / {len(df)} - DESPENSA incluida")
+
+    for i, row in df_show.iterrows():
+        with st.container(border=True):
+            colA, colB, colC, colD = st.columns([3,1,1,1])
+            colA.markdown(f"**{row['PRODUCTO']}**")
+            colA.caption(f"Stock: {int(row['INV FINAL'])} | Ganas: ${row['COMISION PUNTO ENTREGA']}")
+            colB.metric("Precio", f"${int(row['CUOTA BANCO'])}")
+            cant = colC.number_input("cant", 1, int(row['INV FINAL']) if row['INV FINAL']>0 else 1, 1, key=f"q{i}", label_visibility="collapsed")
+            if colD.button("Agregar", key=f"a{i}"):
+                st.session_state.carrito.append({"producto": row['PRODUCTO'], "precio": row['CUOTA BANCO'], "comision": row['COMISION PUNTO ENTREGA'], "cant": cant, "fila": i+2})
+                st.toast(f"Agregado {row['PRODUCTO']}")
+
+with c2:
+    st.subheader("Tu Venta")
+    if not st.session_state.carrito:
+        st.info("Carrito vacío")
+    else:
+        total = sum(x['precio']*x['cant'] for x in st.session_state.carrito)
+        ganancia = sum(x['comision']*x['cant'] for x in st.session_state.carrito)
+        for x in st.session_state.carrito:
+            st.write(f"{x['cant']} x {x['producto']}")
+
+        st.divider()
+        st.metric("TOTAL", f"${int(total)}")
+        st.metric("TU GANANCIA", f"${int(ganancia)}")
+
+        if st.button("✅ COBRAR Y DESCONTAR STOCK", type="primary", use_container_width=True):
+            with st.spinner("Actualizando Sheet..."):
+                for item in st.session_state.carrito:
+                    # Columna F = INV FINAL (6), G = VENTA CALCULADA (7) - ajusta si tu orden es diferente
+                    sheet.update_cell(item['fila'], 6, int(df.iloc[item['fila']-2]['INV FINAL'] - item['cant']))
+                    sheet.update_cell(item['fila'], 7, int(df.iloc[item['fila']-2]['VENTA CALCULADA'] + item['cant']))
+            st.balloons()
+            st.success(f"¡Cobrado! Ganaste ${int(ganancia)}")
+            st.session_state.carrito = []
+            st.cache_data.clear()
+            st.rerun()
+
+        if st.button("Vaciar", use_container_width=True):
+            st.session_state.carrito = []
+            st.rerun()
