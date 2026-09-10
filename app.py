@@ -1,91 +1,101 @@
 import streamlit as st
 import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
-from google.oauth2.service_account import Credentials
-from PIL import Image
-import os
 
-st.set_page_config(page_title="BITU - Tienda", layout="wide", page_icon="🛒")
+st.set_page_config(page_title="BITU", page_icon="🛒", layout="wide")
 
-# --- LOGO + ESTILO TEAL ---
-st.markdown("""
-<style>
-.stButton>button[kind="primary"]{background-color:#009688!important; border-color:#009688!important;}
-div[data-testid="stMetricValue"]{color:#009688;}
-</style>
-""", unsafe_allow_html=True)
+# --- CONEXION A GOOGLE SHEET ---
+scope = ["https://spreadsheets.google.com/feeds",'https://www.googleapis.com/auth/drive']
+creds = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gcp_service_account"], scope)
+client = gspread.authorize(creds)
+sheet = client.open_by_url(st.secrets["sheet_url"]).sheet1
 
-col_logo, col_titulo = st.columns([1,4])
-if os.path.exists("logo.png"):
-    col_logo.image("logo.png", width=90)
-else:
-    col_logo.markdown("# 🛒")
-col_titulo.title("BITU - Tienda")
-col_titulo.caption("Con control de stock - Tema Teal")
+# --- LEER DATOS ---
+data = sheet.get_all_values()
+df = pd.DataFrame(data[1:], columns=data[0])
 
-# --- CONEXION ---
-@st.cache_resource
-def conectar():
-    info = dict(st.secrets["gcp_service_account"])
-    creds = Credentials.from_service_account_info(info, scopes=["https://www.googleapis.com/auth/spreadsheets","https://www.googleapis.com/auth/drive"])
-    client = gspread.authorize(creds)
-    sh = client.open_by_key(st.secrets["SHEET_ID"])
-    return sh.sheet1
+# Columnas segun tu foto
+# B=CUOTA BANCO(1), C=COMISION(2), D=INV INICIAL(3), E=ENTRADA(4), F=SALIDA(5), G=INV FINAL(6), H=VENTA CALC(7), I=CUOTA VENTA(8)
+# En python es indice 0, asi que F=5, G=6, H=7
 
-def cargar_datos():
-    sheet = conectar()
-    df = pd.DataFrame(sheet.get_all_records())
-    df = df[df['PRODUCTO'].astype(str).str.strip()!= ""]
-    for c in df.columns:
-        if c!='PRODUCTO': df[c]=pd.to_numeric(df[c], errors='coerce').fillna(0)
-    return df, sheet
+productos = []
+for i, row in df.iterrows():
+    try:
+        inv_inicial = int(float(row[3] or 0)) # D
+        entrada = int(float(row[4] or 0)) # E
+        salida = int(float(row[5] or 0)) # F
+        stock = inv_inicial + entrada - salida
+        if stock < 0: stock = 0
 
-if 'carrito' not in st.session_state: st.session_state.carrito=[]
+        productos.append({
+            "fila": i+2,
+            "nombre": row[0],
+            "precio": float(row[1] or 0),
+            "comision": float(row[2] or 0),
+            "inv_inicial": inv_inicial,
+            "entrada": entrada,
+            "salida": salida,
+            "stock": stock,
+            "index": i
+        })
+    except:
+        continue
 
-df, sheet = cargar_datos()
+# --- INTERFAZ ---
+st.markdown("<h1 style='color:#0E9F9F'>BITU - Punto de Venta</h1>", unsafe_allow_html=True)
 
-c1,c2 = st.columns([2.5,1])
-with c1:
-    busca = st.text_input("🔍 Buscar", placeholder="ACEITE, AGUA, DESPENSA...")
-    df_show = df[df['PRODUCTO'].str.contains(busca, case=False, na=False)] if busca else df
-    for i,row in df_show.iterrows():
-        stock_real = int(row['INV INICIAL'] + row['ENTRADA'] - row['VENTA CALCULADA'])
-        with st.container(border=True):
-            colA,colB,colC,colD = st.columns([3,1,1,1])
-            colA.markdown(f"**{row['PRODUCTO']}**")
-            if stock_real <= 0:
-                colA.markdown("<span style='color:red'>⛔ SIN STOCK</span>", unsafe_allow_html=True)
+if "carrito" not in st.session_state:
+    st.session_state.carrito = {}
+
+col1, col2 = st.columns([2,1])
+
+with col1:
+    for p in productos:
+        c1, c2, c3 = st.columns([3,1,1])
+        with c1:
+            st.write(f"**{p['nombre']}** - ${p['precio']} - Stock: {p['stock']}")
+        with c2:
+            if p['stock'] <= 0:
+                st.error("⛔ SIN STOCK")
             else:
-                colA.caption(f"Stock: {stock_real} | Ganas: ${int(row['COMISION PUNTO ENTREGA'])}")
-            colB.metric("Precio", f"${int(row['CUOTA BANCO'])}")
-            if stock_real <= 0:
-                colC.number_input("c",1,1,1,key=f"q{i}",disabled=True,label_visibility="collapsed")
-                colD.button("Sin stock", key=f"a{i}", disabled=True)
-            else:
-                cant = colC.number_input("c",1,stock_real,1,key=f"q{i}",label_visibility="collapsed")
-                if colD.button("Agregar", key=f"a{i}"):
-                    en_carrito = sum(x['cant'] for x in st.session_state.carrito if x['producto']==row['PRODUCTO'])
-                    if en_carrito + cant > stock_real:
-                        st.error(f"Solo quedan {stock_real - en_carrito}")
+                if st.button("Agregar", key=f"add_{p['index']}"):
+                    if p['nombre'] in st.session_state.carrito:
+                        if st.session_state.carrito[p['nombre']]['cantidad'] < p['stock']:
+                            st.session_state.carrito[p['nombre']]['cantidad'] += 1
+                        else:
+                            st.warning("No hay mas stock")
                     else:
-                        st.session_state.carrito.append({"producto":row['PRODUCTO'],"precio":row['CUOTA BANCO'],"comision":row['COMISION PUNTO ENTREGA'],"cant":cant,"fila":i+2,"venta_actual":row['VENTA CALCULADA']})
-                        st.toast(f"Agregado {row['PRODUCTO']}")
+                        st.session_state.carrito[p['nombre']] = {"cantidad": 1, "datos": p}
 
-with c2:
-    st.subheader("Tu Venta")
-    if not st.session_state.carrito: st.info("Carrito vacío")
-    else:
-        total = sum(x['precio']*x['cant'] for x in st.session_state.carrito)
-        gan = sum(x['comision']*x['cant'] for x in st.session_state.carrito)
-        for x in st.session_state.carrito: st.write(f"{x['cant']} x {x['producto']}")
-        st.divider()
-        st.metric("TOTAL", f"${int(total)}")
-        st.metric("TU GANANCIA", f"${int(gan)}")
-        if st.button("✅ COBRAR Y DESCONTAR", type="primary", use_container_width=True):
-            with st.spinner("Descontando stock..."):
-                for item in st.session_state.carrito:
-                    sheet.update_cell(item['fila'], 7, int(item['venta_actual'] + item['cant']))
-            st.balloons(); st.success(f"¡Cobrado! Ganaste ${int(gan)}")
-            st.session_state.carrito=[]; st.rerun()
-        if st.button("Vaciar", use_container_width=True):
-            st.session_state.carrito=[]; st.rerun()
+with col2:
+    st.subheader("Carrito")
+    total = 0
+    comision_total = 0
+    for nombre, item in st.session_state.carrito.items():
+        cant = item['cantidad']
+        precio = item['datos']['precio']
+        com = item['datos']['comision']
+        st.write(f"{nombre} x{cant} = ${cant*precio}")
+        total += cant*precio
+        comision_total += cant*com
+
+    st.write(f"**Total: ${total}**")
+    st.write(f"Tu comisión: ${comision_total}")
+
+    if st.button("COBRAR 💰"):
+        for nombre, item in st.session_state.carrito.items():
+            p = item['datos']
+            fila = p['fila']
+            nueva_salida = p['salida'] + item['cantidad']
+            nuevo_inv_final = p['inv_inicial'] + p['entrada'] - nueva_salida
+
+            # ACTUALIZACION CORRECTA
+            sheet.update_cell(fila, 6, nueva_salida) # F = SALIDA <- AQUI CAE LA VENTA
+            sheet.update_cell(fila, 7, nuevo_inv_final) # G = INV FINAL = D+E-F
+            sheet.update_cell(fila, 8, nueva_salida) # H = VENTA CALCULADA = F
+            sheet.update_cell(fila, 9, float(sheet.cell(fila, 2).value or 0) * nueva_salida) # I = CUOTA VENTA
+
+        st.success("Venta guardada en SALIDA (F)")
+        st.session_state.carrito = {}
+        st.rerun()
