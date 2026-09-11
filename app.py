@@ -2,7 +2,16 @@ import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
 
-st.set_page_config(page_title="BITU", layout="centered")
+st.set_page_config(page_title="BITU", page_icon="🛒", layout="centered")
+
+# --- ESTILO BONITO ---
+st.markdown("""
+<style>
+.stButton>button {border-radius:12px; height:45px; font-weight:bold;}
+div[data-testid="stMetric"] {background:#f0f2f6; padding:10px; border-radius:12px;}
+</style>
+""", unsafe_allow_html=True)
+
 scope = ["https://www.googleapis.com/auth/spreadsheets","https://www.googleapis.com/auth/drive"]
 creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
 client = gspread.authorize(creds)
@@ -20,36 +29,57 @@ for i,row in enumerate(data[1:]):
         productos.append({"fila":i+2,"nombre":row[0],"precio":float(row[1] or 0),"stock":inv+ent-sal,"inv":inv,"ent":ent,"sal":sal})
     except: continue
 
-st.title("BITU - Tienda")
+st.title("🛒 BITU - Tienda")
+st.caption("Pachuca, Hgo. | Sistema de ventas")
 
+# --- CARRITO BONITO ARRIBA ---
 if st.session_state.carrito:
-    st.info("🛒 CARRITO")
-    total=0
-    for nom,it in list(st.session_state.carrito.items()):
-        st.write(f"{nom} x{it['cantidad']} = ${it['cantidad']*it['datos']['precio']}")
-        total+=it['cantidad']*it['datos']['precio']
-    st.write(f"**TOTAL ${total}**")
-    if st.button("COBRAR TODO 💰", type="primary", use_container_width=True):
-        for nom,it in st.session_state.carrito.items():
-            p=it['datos']; ns=p['sal']+it['cantidad']
-            sheet.update_cell(p['fila'],6,ns)
-            sheet.update_cell(p['fila'],7,p['inv']+p['ent']-ns)
-            sheet.update_cell(p['fila'],8,ns)
-        st.session_state.carrito={}
-        st.balloons()
-        st.success("Guardado en F=SALIDA=3")
-        st.rerun()
-    st.divider()
-
-for p in productos:
-    st.write(f"**{p['nombre']}** - ${p['precio']} - Stock:{p['stock']}")
-    if p['stock'] <=0:
-        st.error("SIN STOCK")
-    else:
-        if st.button(f"Agregar {p['nombre']}", key=f"a{p['fila']}", use_container_width=True):
-            if p['nombre'] in st.session_state.carrito:
-                if st.session_state.carrito[p['nombre']]['cantidad'] < p['stock']:
-                    st.session_state.carrito[p['nombre']]['cantidad']+=1
-            else:
-                st.session_state.carrito[p['nombre']]={"cantidad":1,"datos":p}
+    with st.container(border=True):
+        st.subheader(f"🛒 Tu Carrito ({len(st.session_state.carrito)})")
+        total=0
+        for nom,it in list(st.session_state.carrito.items()):
+            col1,col2,col3 = st.columns([3,1,1])
+            col1.write(f"**{nom}** x{it['cantidad']}")
+            total+=it['cantidad']*it['datos']['precio']
+            col2.write(f"${it['cantidad']*it['datos']['precio']:.0f}")
+            if col3.button("❌", key=f"q_{nom}"):
+                del st.session_state.carrito[nom]
+                st.rerun()
+        st.divider()
+        st.metric("TOTAL A COBRAR", f"${total:.0f}")
+        if st.button("✅ COBRAR TODO", type="primary", use_container_width=True):
+            for nom,it in st.session_state.carrito.items():
+                p=it['datos']; ns=p['sal']+it['cantidad']
+                sheet.update_cell(p['fila'], 6, ns) # F = SALIDA = 3 ¡CORREGIDO!
+                sheet.update_cell(p['fila'], 7, p['inv']+p['ent']-ns)
+                sheet.update_cell(p['fila'], 8, ns)
+            st.session_state.carrito={}
+            st.balloons()
+            st.success("¡Venta guardada correctamente en columna F!")
             st.rerun()
+else:
+    st.info("Agrega productos para empezar a vender")
+
+st.divider()
+st.subheader("📦 Productos Disponibles")
+
+# --- PRODUCTOS BONITOS ---
+for p in productos:
+    with st.container(border=True):
+        c1,c2 = st.columns([3,1])
+        c1.markdown(f"**{p['nombre']}** \n💰 ${p['precio']:.0f} | 📦 Stock: {p['stock']}")
+        if p['stock'] <= 0:
+            c2.error("Agotado")
+        elif p['stock'] < 5:
+            c2.button(f"Agregar", key=f"a{p['fila']}", use_container_width=True)
+            st.caption(f"⚠️ ¡Quedan pocos! {p['stock']}")
+            if st.session_state.get(f"a{p['fila']}"):
+                pass
+        else:
+            if c2.button("Agregar +", key=f"a{p['fila']}", use_container_width=True):
+                if p['nombre'] in st.session_state.carrito:
+                    if st.session_state.carrito[p['nombre']]['cantidad'] < p['stock']:
+                        st.session_state.carrito[p['nombre']]['cantidad']+=1
+                else:
+                    st.session_state.carrito[p['nombre']]={"cantidad":1,"datos":p}
+                st.rerun()
