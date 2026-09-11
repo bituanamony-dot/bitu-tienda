@@ -3,7 +3,14 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="BITU", page_icon="🛒", layout="centered")
-st.markdown("<style>.stButton>button{border-radius:12px;height:45px;font-weight:bold}</style>", unsafe_allow_html=True)
+
+# --- LOGO ---
+col_logo, col_title = st.columns([1,3])
+with col_logo:
+    st.image("logo.png", width=100)
+with col_title:
+    st.title("BITU")
+    st.caption("Tienda - Pachuca, Hgo.")
 
 scope = ["https://www.googleapis.com/auth/spreadsheets","https://www.googleapis.com/auth/drive"]
 creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
@@ -13,7 +20,6 @@ sheet = client.open_by_key(st.secrets["SHEET_ID"]).sheet1
 if "carrito" not in st.session_state:
     st.session_state.carrito = {}
 
-# --- LEER HOJA ---
 data = sheet.get_all_values()
 productos=[]
 total_vendido_general = 0
@@ -32,7 +38,6 @@ for i,row in enumerate(data[1:]):
 tab1, tab2 = st.tabs(["🛒 TIENDA", "📊 REPORTE GENERAL"])
 
 with tab1:
-    st.title("BITU - Tienda")
     if st.session_state.carrito:
         with st.container(border=True):
             st.subheader(f"🛒 Carrito ({len(st.session_state.carrito)})")
@@ -49,17 +54,16 @@ with tab1:
             if st.button("✅ COBRAR TODO", type="primary", use_container_width=True):
                 for nom,it in st.session_state.carrito.items():
                     p=it['datos']; ns=p['sal']+it['cantidad']
-                    sheet.update_cell(p['fila'], 6, ns) # F = SALIDA
+                    sheet.update_cell(p['fila'], 6, ns)
                     sheet.update_cell(p['fila'], 7, p['inv']+p['ent']-ns)
                     sheet.update_cell(p['fila'], 8, ns)
                 st.session_state.carrito={}
                 st.balloons()
-                st.success("Venta guardada en F")
+                st.success("Venta guardada en F=SALIDA=3")
                 st.rerun()
     else:
-        st.info("Agrega productos")
+        st.info("Agrega productos para vender")
 
-    st.divider()
     for p in productos:
         with st.container(border=True):
             c1,c2 = st.columns([3,1])
@@ -76,14 +80,11 @@ with tab1:
                     st.rerun()
 
 with tab2:
-    st.title("📊 Reporte General")
+    st.subheader("📊 Reporte General")
     st.caption("Esta es la hoja que importas - Resumen total cobrado")
-
-    col1,col2 = st.columns(2)
-    col1.metric("TOTAL ARTÍCULOS VENDIDOS", f"{total_vendido_general} pzas")
-    col2.metric("TOTAL COBRADO GENERAL", f"${total_cobrado_general:,.0f}")
-
+    c1,c2 = st.columns(2)
+    c1.metric("TOTAL ARTÍCULOS VENDIDOS", f"{total_vendido_general} pzas")
+    c2.metric("TOTAL COBRADO", f"${total_cobrado_general:,.0f}")
     st.divider()
-    st.write("Detalle por producto (para control):")
     for p in productos:
         st.write(f"{p['nombre']}: Vendidos {p['sal']} = ${p['sal']*p['precio']:.0f}")
